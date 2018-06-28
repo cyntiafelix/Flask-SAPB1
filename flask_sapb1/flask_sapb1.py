@@ -577,3 +577,81 @@ class SAPB1Adaptor(object):
             shipmentId = shipment['DocEntry']
             shipment['items'] = self._getShipmentItems(shipmentId, itemColumns)
         return shipments
+
+    def getItems(self, limit=1, columns=None, whs=None, code=None):
+        """Retrieve items(products) from SAP B1.
+        """
+        if columns:
+            cols = columns
+        else:
+            cols = 'ItemCode, ItemName, ItmsGrpCod, UgpEntry, U_MARCA, U_DIVISION, AvgPrice, CreateDate, UpdateDate'
+            
+        if whs:
+            sql = """SELECT top {0} {1} FROM dbo.OITM
+                     WHERE ItemCode in
+                         (SELECT ItemCode FROM dbo.OITW
+                          WHERE WhsCode = '{2}')""".format(limit, cols, whs)
+        elif code:
+            sql = """SELECT {0} FROM dbo.OITM
+                     WHERE ItemCode = '{1}'""".format(cols, code)
+        else:
+            sql = """SELECT top {0} {1} FROM dbo.OITM""".format(limit, cols)
+
+        print(sql)
+
+        self.cursorAdaptor.sqlSrvCursor.execute(sql)
+        itemlist = []
+        for row in self.cursorAdaptor.sqlSrvCursor:
+            itemdata = {}
+            for k, v in row.items():
+                value = ''
+                if isinstance(v, datetime.datetime):
+                    value = v.strftime("%Y-%m-%d %H:%M:%S")
+                elif isinstance(v, decimal.Decimal):
+                    value = str(v)
+                elif v is not None:
+                    value = v
+                itemdata[k] = value
+            itemlist.append(itemdata)
+        return itemlist
+
+    def getPrices(self, limit=1, columns=None, whs=None, code=None):
+        """Retrieve prices(products) from SAP B1.
+        """
+        if columns:
+            cols = columns
+        else:
+            cols = 'ItemCode, Price, Currency, Ovrwritten, Factor'
+
+        listNumber = 2 #Lista de Ventas
+        if whs:
+            sql = """SELECT top {0} {1} FROM dbo.ITM1
+                     WHERE PriceList = {2}
+                     AND ItemCode in
+                         (SELECT ItemCode FROM dbo.OITW
+                          WHERE WhsCode = '{3}')""".format(limit, cols, listNumber, whs)
+        elif code:
+            sql = """SELECT {0} FROM dbo.ITM1
+                     WHERE PriceList = {1}
+                     AND ItemCode = '{2}'""".format(cols, listNumber, code)
+        else:
+            sql = """SELECT top {0} {1} FROM dbo.ITM1
+                     WHERE PriceList = {2}""".format(limit, cols, listNumber)
+
+        print(sql)
+
+        self.cursorAdaptor.sqlSrvCursor.execute(sql)
+        pricelist = []
+        for row in self.cursorAdaptor.sqlSrvCursor:
+            itemdata = {}
+            for k, v in row.items():
+                value = ''
+                if isinstance(v, datetime.datetime):
+                    value = v.strftime("%Y-%m-%d %H:%M:%S")
+                elif isinstance(v, decimal.Decimal):
+                    value = str(v)
+                elif v is not None:
+                    value = v
+                itemdata[k] = value
+            pricelist.append(itemdata)
+        return pricelist
