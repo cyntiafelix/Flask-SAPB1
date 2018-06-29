@@ -54,18 +54,19 @@ class MsSqlAdaptor(object):
         self.conn.close()
         current_app.logger.info("Close SAPB1 DB connection")
 
-    def execute(self, sql, *args, **kwargs):
-        if len(args):
+    def execute(self, sql, args=None, **kwargs):
+        if args is None or len(args) > 1:
+            # don't convert to tuple
+            pass
+        elif len(args):
             args = tuple(args)
-        else:
-            args = None
 
         if len(kwargs):
-            args = (kwargs,)
+            args = kwargs
         self.cursor.execute(sql, args)
 
-    def fetch_all(self, sql, *args, **kwargs):
-        self.execute(sql, *args, **kwargs)
+    def fetch_all(self, sql, args=None, **kwargs):
+        self.execute(sql, args=None, **kwargs)
         for row in self.cursor:
             item = {}
             for k, v in row.items():
@@ -79,8 +80,8 @@ class MsSqlAdaptor(object):
                 item[k] = value
             yield item
 
-    def fetchone(self, sql, *args, **kwargs):
-        self.execute(sql, *args, **kwargs)
+    def fetchone(self, sql, args=None, **kwargs):
+        self.execute(sql, args, **kwargs)
         return self.cursor.fetchone()
 
 
@@ -409,7 +410,7 @@ class SAPB1Adaptor(object):
         if len(params) > 0:
             sql = sql + ' WHERE ' + " AND ".join(["{0} = %({1})s".format(k, k) for k in params.keys()])
 
-        return list(self.sql_adaptor.fetch_all(sql))
+        return list(self.sql_adaptor.fetch_all(sql, params))
 
     def getShipments(self, num=100, columns=[], params={}, itemColumns=[]):
         """Retrieve shipments(deliveries) from SAP B1.
@@ -425,7 +426,7 @@ class SAPB1Adaptor(object):
             sql = sql + ' WHERE ' + " AND ".join(["{0} {1} %({2})s".format(k, ops[k], k) for k in params.keys()])
 
         p = {key: v['value'] for key, v in params.keys()}
-        shipments = list(self.sql_adaptor.fetch_all(sql, **p))
+        shipments = list(self.sql_adaptor.fetch_all(sql, p))
         for shipment in shipments:
             shipmentId = shipment['DocEntry']
             shipment['items'] = self._getShipmentItems(shipmentId, itemColumns)
