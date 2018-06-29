@@ -74,35 +74,38 @@ class SAPB1Adaptor(object):
         else:
             app.teardown_request(self.teardown)
 
-    def connect(self, type=None):
-        """Initiate the connect with SAP B1 and MS SQL server.
-        """
-        if type == "COM":
-            SAPbobsCOM = __import__(current_app.config['DIAPI'], globals(), locals(), [], -1)
-            self.constants = getattr(SAPbobsCOM, "constants")
-            Company = getattr(SAPbobsCOM, "Company")
-            company = Company()
-            company.Server = current_app.config['SERVER']
-            company.UseTrusted = False
-            company.language = eval("self.constants." + current_app.config['LANGUAGE'])
-            company.DbServerType = eval("self.constants." + current_app.config['DBSERVERTYPE'])
-            company.CompanyDB = current_app.config['COMPANYDB']
-            company.UserName = current_app.config['B1USERNAME']
-            company.Password = current_app.config['B1PASSWORD']
-            company.Connect()
-            log = "Open SAPB1 connection for " + company.CompanyName
-            current_app.logger.info(log)
-            return SAPB1COMAdaptor(company=company)
-        elif type == "CURSOR":
-            sqlSrvConn = pymssql.connect(current_app.config['SERVER'],
-                                        current_app.config['DBUSERNAME'],
-                                        current_app.config['DBPASSWORD'],
-                                        current_app.config['COMPANYDB'])
-            log = "Open SAPB1 DB connection"
-            current_app.logger.info(log)
-            return MSSQLCursorAdaptor(sqlSrvConn=sqlSrvConn)
-        else:
-            return None
+    @property
+    def com_adaptor(self):
+        """Initiate the connect with SAP B1"""
+
+        SAPbobsCOM = __import__(current_app.config['DIAPI'], globals(), locals(), [], -1)
+        self.constants = SAPbobsCOM.constants
+        Company = SAPbobsCOM.Company
+        company = Company()
+        company.Server = current_app.config['SERVER']
+        company.UseTrusted = False
+        company.language = getattr(self.constants, current_app.config['LANGUAGE'])
+        company.DbServerType = getattr(self.constants, current_app.config['DBSERVERTYPE'])
+        company.CompanyDB = current_app.config['COMPANYDB']
+        company.UserName = current_app.config['B1USERNAME']
+        company.Password = current_app.config['B1PASSWORD']
+        company.Connect()
+        log = "Open SAPB1 connection for " + company.CompanyName
+        current_app.logger.info(log)
+        return SAPB1COMAdaptor(company=company)
+
+
+    @property
+    def sql_adaptor(self):
+        """Initiate the connect with MS SQL server. """
+
+        sqlSrvConn = pymssql.connect(current_app.config['SERVER'],
+                                    current_app.config['DBUSERNAME'],
+                                    current_app.config['DBPASSWORD'],
+                                    current_app.config['COMPANYDB'])
+        log = "Open SAPB1 DB connection"
+        current_app.logger.info(log)
+        return MSSQLCursorAdaptor(sqlSrvConn=sqlSrvConn)
 
     def teardown(self, exception):
         ctx = stack.top
@@ -126,17 +129,21 @@ class SAPB1Adaptor(object):
     def comAdaptor(self):
         ctx = stack.top
         if ctx is not None:
-            if not hasattr(ctx, 'sapb1COMAdaptor'):
-                ctx.sapb1COMAdaptor = self.connect(type="COM")
-            return ctx.sapb1COMAdaptor
+            try:
+                return ctx.sapb1COMAdaptor
+            except AttributeError:
+                ctx.sapb1COMAdaptor = adaptador = self.com_adaptor
+                return adaptor
 
     @property
     def cursorAdaptor(self):
         ctx = stack.top
         if ctx is not None:
-            if not hasattr(ctx, 'msSQLCursorAdaptor'):
-                ctx.msSQLCursorAdaptor = self.connect(type="CURSOR")
-            return ctx.msSQLCursorAdaptor
+            try:
+                return ctx.msSQLCursorAdaptor
+            except AttributeError:
+                ctx.msSQLCursorAdaptor = adaptor = self.sql_adaptor
+                return adaptor
 
     def trimValue(self, value, maxLength):
         """Trim the value.
