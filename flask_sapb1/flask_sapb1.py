@@ -191,7 +191,7 @@ class SAPB1Adaptor(object):
         params = dict({(k, 'null' if v is None else v) for k, v in contact.items()})
         params['cardcode'] = cardCode
         sql = sql + ' WHERE ' + " AND ".join(["{0} = %({1})s".format(k, k) for k in params.keys()])
-        return list(self.sql_adaptor.fetch_all(sql))
+        return list(self.sql_adaptor.fetch_all(sql, params))
 
     def insertContact(self, cardCode, contact):
         """Insert a new contact into a business partner by CardCode.
