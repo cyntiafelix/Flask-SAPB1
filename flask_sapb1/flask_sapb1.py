@@ -293,21 +293,19 @@ class SAPB1Adaptor(object):
     def insertOrder(self, o):
         """Insert an order into SAP B1.
         """
-        o["billto_telephone"] = self.trimValue(o["billto_telephone"],20)
-        o['billto_address'] = self.trimValue(o['billto_address'],100)
-        o['shipto_address'] = self.trimValue(o['shipto_address'],100)
-        order = self.comAdaptor.company.GetBusinessObject(self.constants.oOrders)
+        com = self.com_adaptor    
+        order = com.company.GetBusinessObject(com.constants.oOrders)
         order.DocDueDate = o['doc_due_date']
         order.CardCode = o['card_code']
-        name = o['billto_firstname'] + ' ' + o['billto_lastname']
-        name = name[0:50]
-        order.CardName = name
-        order.DocCurrency = self.getMainCurrency()
-        order.ContactPersonCode = self.getContactPersonCode(o)
+        order.NumAtCard = str(o['num_at_card'])
+        #Cesehsa User Field
+        order.UserFields.Fields("U_XAM_OC").Value = str(o['orden_compra'])
+        
         if 'expenses_freightname' in o.keys():
             order.Expenses.ExpenseCode = self.getExpnsCode(o['expenses_freightname'])
             order.Expenses.LineTotal = o['expenses_linetotal']
             order.Expenses.TaxCode = o['expenses_taxcode']
+
         if 'discount_percent' in o.keys():
             order.DiscountPercent = o['discount_percent']
 
@@ -319,27 +317,25 @@ class SAPB1Adaptor(object):
         if 'payment_method' in o.keys():
             order.PaymentMethod = o['payment_method']
 
-        # Set Magento Order Inc Id
-        if 'fe_order_id_udf' in o.keys():
-            order.UserFields.Fields.Item(o['fe_order_id_udf']).Value = str(o['fe_order_id'])
-        else:
-            order.NumAtCard = str(o['fe_order_id'])
+        ## Set bill to address properties
+        #order.AddressExtension.BillToCity = o['billto_city']
+        #order.AddressExtension.BillToCountry = o['billto_country']
+        #order.AddressExtension.BillToCounty = o['billto_country']
+        #order.AddressExtension.BillToState = o['billto_state']
+        #order.AddressExtension.BillToStreet = o['billto_address']
+        #order.AddressExtension.BillToZipCode = o['billto_zipcode']
 
-        # Set bill to address properties
-        order.AddressExtension.BillToCity = o['billto_city']
-        order.AddressExtension.BillToCountry = o['billto_country']
-        order.AddressExtension.BillToCounty = o['billto_country']
-        order.AddressExtension.BillToState = o['billto_state']
-        order.AddressExtension.BillToStreet = o['billto_address']
-        order.AddressExtension.BillToZipCode = o['billto_zipcode']
+        ## Set ship to address properties
+        #order.AddressExtension.ShipToCity = o['shipto_city']
+        #order.AddressExtension.ShipToCountry = o['shipto_country']
+        #order.AddressExtension.ShipToCounty = o['shipto_county']
+        #order.AddressExtension.ShipToState = o['shipto_state']
+        #order.AddressExtension.ShipToStreet = o['shipto_address']
+        #order.AddressExtension.ShipToZipCode = o['shipto_zipcode']
 
-        # Set ship to address properties
-        order.AddressExtension.ShipToCity = o['shipto_city']
-        order.AddressExtension.ShipToCountry = o['shipto_country']
-        order.AddressExtension.ShipToCounty = o['shipto_county']
-        order.AddressExtension.ShipToState = o['shipto_state']
-        order.AddressExtension.ShipToStreet = o['shipto_address']
-        order.AddressExtension.ShipToZipCode = o['shipto_zipcode']
+        # Set Comments
+        if 'comments' in o.keys():
+            order.Comments = o['comments']
 
         i = 0
         for item in o['items']:
@@ -347,53 +343,60 @@ class SAPB1Adaptor(object):
             order.Lines.SetCurrentLine(i)
             order.Lines.ItemCode = item['itemcode']
             order.Lines.Quantity = float(item['quantity'])
-            order.Lines.Price = decimal.Decimal(item['price'])
-            order.Lines.TaxCode = item['taxcode']
-            order.Lines.LineTotal = item['linetotal']
             i = i + 1
 
         lRetCode = order.Add()
         if lRetCode != 0:
-            error = str(self.comAdaptor.company.GetLastError())
+            error = str(self.com_adaptor.company.GetLastError())
             current_app.logger.error(error)
             raise Exception(error)
         else:
             params = None
-            if 'fe_order_id_udf' in o.keys():
-                params = {o['fe_order_id_udf']: {'value': str(o['fe_order_id'])}}
-            else:
-                params = {'NumAtCard': {'value': str(o['fe_order_id'])}}
+            params = {'NumAtCard': {'value': str(o['num_at_card'])}}
             orders = self.getOrders(num=1, columns=['DocEntry'], params=params)
-            boOrderId = orders[0]['DocEntry']
-            return boOrderId
+            orderDocEntry = orders[0]['DocEntry']
+            #Linking Sales Order with Quotation
+            if 'quotation_id' in o.keys():
+                orderlinkquotation_sql= """UPDATE dbo.RDR1
+                                        SET dbo.RDR1.BaseRef = q.DocNum, dbo.RDR1.BaseType = 23, dbo.RDR1.BaseEntry = q.DocEntry
+                                        FROM dbo.OQUT q
+                                        WHERE dbo.RDR1.DocEntry = '{0}'
+                                        AND q.DocEntry = '{1}'
+                                     """.format(orderDocEntry,str(o['quotation_id']))
+                cursor = self.sql_adaptor.cursor
+                cursor.execute(orderlinkquotation_sql)
+                self.sql_adaptor.conn.commit()
+            return orderDocEntry
         
-    def insertQuoation(self, o):
-        """Create a quoation into SAP B1.
+    def insertQuotation(self, q):
+        """Create a quotation into SAP B1.
         """
         com = self.com_adaptor    
-        quoation = com.company.GetBusinessObject(com.constants.oQuotations)
-        quoation.DocDueDate = o['doc_due_date']
-        quoation.CardCode = o['card_code']
-        quoation.NumAtCard = str(o['num_order_id'])
+        quotation = com.company.GetBusinessObject(com.constants.oQuotations)
+        quotation.DocDueDate = q['doc_due_date']
+        quotation.CardCode = q['card_code']
+        quotation.NumAtCard = str(q['num_at_card'])
 
         i = 0
-        for item in o['items']:
-            quoation.Lines.Add()
-            quoation.Lines.SetCurrentLine(i)
-            quoation.Lines.ItemCode = item['itemcode']
-            quoation.Lines.Quantity = float(item['quantity'])
+        for item in q['items']:
+            quotation.Lines.Add()
+            quotation.Lines.SetCurrentLine(i)
+            quotation.Lines.ItemCode = item['itemcode']
+            quotation.Lines.Quantity = float(item['quantity'])
             i = i + 1
 
-        lRetQCode = quoation.Add()
+        lRetQCode = quotation.Add()
         if lRetQCode != 0:
             error = str(self.com_adaptor.company.GetLastError())
             current_app.logger.error(error)
             raise Exception(error)
         else:
-            quoation_sql = """SELECT top(1) DocNum FROM dbo.OQUT WHERE NumAtCard = '%s' order by DocNum""" %str(o['num_order_id'])
-            sqlresult = self.sql_adaptor.fetchone(quoation_sql)
-            quoationDocNum = sqlresult['DocNum']
-            return quoationDocNum
+            print(q['num_at_card'])
+            quotation_sql = """SELECT top(1) DocEntry FROM dbo.OQUT
+                               WHERE NumAtCard = '{0}'""".format(q['num_at_card'])
+            sqlresult = self.sql_adaptor.fetchone(quotation_sql)
+            quotationDocEntry = sqlresult['DocEntry']
+            return quotationDocEntry
 
     def cancelOrder(self, o):
         """Cancel an order in SAP B1.
