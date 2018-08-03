@@ -18,7 +18,7 @@ class SapB1ComAdaptor(object):
     def __init__(self, config):
         CoInitialize()
         SAPbobsCOM = __import__(config['DIAPI'], globals(), locals(), [], -1)
-        self.constants  = SAPbobsCOM.constants
+        self.constants = SAPbobsCOM.constants
         self.company = company = SAPbobsCOM.Company()
         company.Server = config['SERVER']
         company.DbServerType = getattr(self.constants, config['DBSERVERTYPE'])
@@ -350,23 +350,23 @@ class SAPB1Adaptor(object):
             error = str(self.com_adaptor.company.GetLastError())
             current_app.logger.error(error)
             raise Exception(error)
-        else:
-            params = None
-            params = {'NumAtCard': {'value': str(o['num_at_card'])}}
-            orders = self.getOrders(num=1, columns=['DocEntry'], params=params)
-            orderDocEntry = orders[0]['DocEntry']
-            #Linking Sales Order with Quotation
-            if 'quotation_id' in o.keys():
-                orderlinkquotation_sql= """UPDATE dbo.RDR1
+        
+        params = None
+        params = {'NumAtCard': {'value': str(o['num_at_card'])}}
+        orders = self.getOrders(num=1, columns=['DocEntry'], params=params)
+        orderDocEntry = orders[0]['DocEntry']
+        #Linking Sales Order with Quotation
+        if 'quotation_id' in o.keys():
+            link_quotation_sql= """UPDATE dbo.RDR1
                                         SET dbo.RDR1.BaseRef = q.DocNum, dbo.RDR1.BaseType = 23, dbo.RDR1.BaseEntry = q.DocEntry
                                         FROM dbo.OQUT q
                                         WHERE dbo.RDR1.DocEntry = '{0}'
                                         AND q.DocEntry = '{1}'
                                      """.format(orderDocEntry,str(o['quotation_id']))
-                cursor = self.sql_adaptor.cursor
-                cursor.execute(orderlinkquotation_sql)
-                self.sql_adaptor.conn.commit()
-            return orderDocEntry
+            cursor = self.sql_adaptor.cursor
+            cursor.execute(link_quotation_sql)
+            self.sql_adaptor.conn.commit()
+        return orderDocEntry
         
     def insertQuotation(self, q):
         """Create a quotation into SAP B1.
@@ -390,13 +390,12 @@ class SAPB1Adaptor(object):
             error = str(self.com_adaptor.company.GetLastError())
             current_app.logger.error(error)
             raise Exception(error)
-        else:
-            print(q['num_at_card'])
-            quotation_sql = """SELECT top(1) DocEntry FROM dbo.OQUT
-                               WHERE NumAtCard = '{0}'""".format(q['num_at_card'])
-            sqlresult = self.sql_adaptor.fetchone(quotation_sql)
-            quotationDocEntry = sqlresult['DocEntry']
-            return quotationDocEntry
+        
+        quotation_sql = """SELECT top(1) DocEntry FROM dbo.OQUT
+                            WHERE NumAtCard = %s"""
+        sqlresult = self.sql_adaptor.fetchone(quotation_sql, q['num_at_card'])
+        quotationDocEntry = sqlresult['DocEntry']
+        return quotationDocEntry
 
     def cancelOrder(self, o):
         """Cancel an order in SAP B1.
