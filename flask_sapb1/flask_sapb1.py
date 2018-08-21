@@ -1,7 +1,7 @@
 from flask import current_app, g
 import pymssql
 import datetime
-from time import time
+from time import time, strftime
 import decimal
 from pythoncom import CoInitialize
 import win32com.client.dynamic
@@ -288,6 +288,10 @@ class SAPB1Adaptor(object):
 
     def getTaxCodes(self):
         sql = """SELECT Code, Name, Rate from osta"""
+        return list(self.sql_adaptor.fetch_all(sql))
+
+    def getUSDRate(self):
+        sql = """SELECT Rate from ORTT where RateDate='{0}'""".format(strftime("%Y-%m-%d"))
         return list(self.sql_adaptor.fetch_all(sql))
 
     def insertOrder(self, o):
