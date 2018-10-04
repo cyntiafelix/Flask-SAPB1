@@ -180,6 +180,52 @@ class SAPB1Adaptor(object):
         sql = """SELECT MainCurncy FROM dbo.OADM"""
         return self.sql_adaptor.fetchone(sql)['MainCurncy']
 
+    def insertBusinessPartner(self, customer):
+        """Insert a new business partner
+        """
+        cardcode_sql = """SELECT MAX(T0.CardCode) AS CardCode FROM OCRD T0 WHERE T0.CARDTYPE = 'C' FOR BROWSE"""
+        sql_result = self.sql_adaptor.fetchone(cardcode_sql)
+        last_cardcode = sql_result.get('CardCode')
+        print('Last CardCode:%s'%last_cardcode)
+        next_cardcode = 'C%05d'%(int(last_cardcode.replace('C','')) + 1)
+        print('Next CardCode:%s'%next_cardcode)
+        com = self.com_adaptor       
+        busPartner = com.company.GetBusinessObject(com.constants.oBusinessPartners)
+        busPartner.CardCode = next_cardcode
+        cardname = customer['FirstName'] + ' ' + customer['LastName']        
+        busPartner.CardName = cardname
+        busPartner.GroupCode = '158' #Otros
+        busPartner.UserFields.Fields("LicTradNum").Value = customer['RFC'] 
+        busPartner.UserFields.Fields("Phone1").Value = customer['Phone'] 
+        busPartner.UserFields.Fields("E_Mail").Value = customer['Email']
+        #BP Address
+        address = customer['Address']
+        busPartner.Addresses.Add()
+        busPartner.Addresses.SetCurrentLine(0)
+        busPartner.Addresses.AddressName = "Direccion"    
+        busPartner.Addresses.Street = address['Street']
+        busPartner.Addresses.StreetNo = address['StreetNo']
+        busPartner.Addresses.Block = address['Block']
+        busPartner.Addresses.County = address['County']
+        busPartner.Addresses.City = address['City']
+        busPartner.Addresses.State = address['State']
+        busPartner.Addresses.ZipCode = address['ZipCode']
+        busPartner.Addresses.Country = address['Country']
+        #BP Contact
+        busPartner.ContactEmployees.Add()
+        busPartner.ContactEmployees.SetCurrentLine(0)
+        busPartner.ContactEmployees.Name = cardname
+        busPartner.ContactEmployees.FirstName = customer['FirstName']
+        busPartner.ContactEmployees.LastName = customer['LastName']
+        busPartner.ContactEmployees.Phone1 = customer["Phone"]
+        busPartner.ContactEmployees.E_Mail = customer["Email"]        
+        lRetCode = busPartner.Add()
+        if lRetCode != 0:
+            log = com.company.GetLastErrorDescription()
+            current_app.logger.error(log)
+            raise Exception(log)
+        return next_cardcode    
+
     def getContacts(self, num=1, columns=[], cardCode=None, contact={}):
         """Retrieve contacts under a business partner by CardCode from SAP B1.
         """
