@@ -224,7 +224,34 @@ class SAPB1Adaptor(object):
             log = com.company.GetLastErrorDescription()
             current_app.logger.error(log)
             raise Exception(log)
-        return next_cardcode    
+        return {'CardCode':next_cardcode}
+
+    def updateBusinessPartner(self, CardCode, customer):
+        """Update business partner by CardCode
+        """
+        com = self.com_adaptor       
+        busPartner = com.company.GetBusinessObject(com.constants.oBusinessPartners)
+        busPartner.GetByKey(CardCode);
+        busPartner.UserFields.Fields("Phone1").Value = customer['Phone'] 
+        busPartner.UserFields.Fields("E_Mail").Value = customer['Email']
+        #BP Address
+        address = customer['Address']
+        busPartner.Addresses.Add()
+        busPartner.Addresses.SetCurrentLine(0)
+        busPartner.Addresses.AddressName = "Direccion"    
+        busPartner.Addresses.Street = address['Street']
+        busPartner.Addresses.StreetNo = address['StreetNo']
+        busPartner.Addresses.Block = address['Block']
+        busPartner.Addresses.County = address['County']
+        busPartner.Addresses.City = address['City']
+        busPartner.Addresses.State = address['State']
+        busPartner.Addresses.ZipCode = address['ZipCode']
+        lRetCode = busPartner.Update()
+        if lRetCode != 0:
+            log = com.company.GetLastErrorDescription()
+            current_app.logger.error(log)
+            raise Exception(log)
+        return {'CardCode':CardCode}
 
     def getContacts(self, num=1, columns=[], cardCode=None, contact={}):
         """Retrieve contacts under a business partner by CardCode from SAP B1.
