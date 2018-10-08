@@ -1,8 +1,10 @@
 from flask import current_app, g
 import pymssql
 import datetime
-from time import time
+from time import time, strftime
 import decimal
+from pythoncom import CoInitialize
+import win32com.client.dynamic
 
 try:
     from flask import _app_ctx_stack as stack
@@ -14,18 +16,23 @@ class SapB1ComAdaptor(object):
     """Adaptor contains SAP B1 COM object.
     """
     def __init__(self, config):
-        """Initiate the connect with SAP B1"""
+        CoInitialize()
         SAPbobsCOM = __import__(config['DIAPI'], globals(), locals(), [], -1)
         self.constants = SAPbobsCOM.constants
         self.company = company = SAPbobsCOM.Company()
         company.Server = config['SERVER']
-        company.UseTrusted = False
-        company.language = getattr(self.constants, config['LANGUAGE'])
         company.DbServerType = getattr(self.constants, config['DBSERVERTYPE'])
+        company.LicenseServer = config['LICENSE_SERVER']
         company.CompanyDB = config['COMPANYDB']
         company.UserName = config['B1USERNAME']
         company.Password = config['B1PASSWORD']
-        company.Connect()
+        #company.language = getattr(self.constants, config['LANGUAGE'])
+        company.UseTrusted = config['USE_TRUSTED']
+        result = company.Connect()
+        if result != 0:
+            raise Exception("Not connected to COM %" % result)
+        print('Connected to COM')
+        
 
     def __del__(self):
         if self.company:
@@ -55,10 +62,11 @@ class MsSqlAdaptor(object):
         current_app.logger.info("Close SAPB1 DB connection")
 
     def execute(self, sql, args=None, **kwargs):
-        if args is None or len(args) > 1:
-            # don't convert to tuple
+        if args is None:
             pass
-        elif len(args):
+        elif isinstance(args, dict):
+            pass
+        elif isinstance(args, list):
             args = tuple(args)
 
         if len(kwargs):
@@ -66,13 +74,15 @@ class MsSqlAdaptor(object):
         self.cursor.execute(sql, args)
 
     def fetch_all(self, sql, args=None, **kwargs):
-        self.execute(sql, args=None, **kwargs)
+        self.execute(sql, args, **kwargs)
         for row in self.cursor:
             item = {}
             for k, v in row.items():
                 value = ''
                 if isinstance(v, datetime.datetime):
                     value = v.strftime("%Y-%m-%d %H:%M:%S")
+                elif isinstance(v, unicode):
+                    value = v.encode('ascii', 'ignore').decode("utf-8")
                 elif isinstance(v, decimal.Decimal):
                     value = str(v)
                 elif v is not None:
@@ -129,7 +139,8 @@ class SAPB1Adaptor(object):
             return ctx._COM
         except AttributeError:
             ctx._COM = com = SapB1ComAdaptor(current_app.config)
-            log = "Open SAPB1 connection for " + com.company.CompanyName
+            print(com.company.CompanyName)
+            log = "Open SAPB1 connection for " + com.company.CompanyName            
             current_app.logger.info(log)
             return com
 
@@ -160,26 +171,87 @@ class SAPB1Adaptor(object):
         sql = """SELECT top {0} {1} FROM dbo.ORDR""".format(num, cols)
         if len(params) > 0:
             sql = sql + ' WHERE ' + " AND ".join(["{0} {1} %({2})s".format(k, ops[k], k) for k in params.keys()])
-        cursor = self.sql_adaptor.cursor
-        cursor.execute(sql, {key: params[key]['value'] for key in params.keys()})
-        orders = []
-        for row in cursor:
-            order = {}
-            for k, v in row.items():
-                value = ''
-                if type(v) is datetime.datetime:
-                    value = v.strftime("%Y-%m-%d %H:%M:%S")
-                elif v is not None:
-                    value = str(v)
-                order[k] = value
-            orders.append(order)
-        return orders
+        args = {key: params[key]['value'] for key in params.keys()}
+        return list(self.sql_adaptor.fetch_all(sql, args=args))
 
     def getMainCurrency(self):
         """Retrieve the main currency of the company from SAP B1.
         """
         sql = """SELECT MainCurncy FROM dbo.OADM"""
         return self.sql_adaptor.fetchone(sql)['MainCurncy']
+
+    def insertBusinessPartner(self, customer):
+        """Insert a new business partner
+        """
+        cardcode_sql = """SELECT MAX(T0.CardCode) AS CardCode FROM OCRD T0 WHERE T0.CARDTYPE = 'C' FOR BROWSE"""
+        sql_result = self.sql_adaptor.fetchone(cardcode_sql)
+        last_cardcode = sql_result.get('CardCode')
+        print('Last CardCode:%s'%last_cardcode)
+        next_cardcode = 'C%05d'%(int(last_cardcode.replace('C','')) + 1)
+        print('Next CardCode:%s'%next_cardcode)
+        com = self.com_adaptor       
+        busPartner = com.company.GetBusinessObject(com.constants.oBusinessPartners)
+        busPartner.CardCode = next_cardcode
+        cardname = customer['FirstName'] + ' ' + customer['LastName']        
+        busPartner.CardName = cardname
+        busPartner.GroupCode = '158' #Otros
+        busPartner.UserFields.Fields("LicTradNum").Value = customer['RFC'] 
+        busPartner.UserFields.Fields("Phone1").Value = customer['Phone'] 
+        busPartner.UserFields.Fields("E_Mail").Value = customer['Email']
+        #BP Address
+        address = customer['Address']
+        busPartner.Addresses.Add()
+        busPartner.Addresses.SetCurrentLine(0)
+        busPartner.Addresses.AddressName = "Direccion"    
+        busPartner.Addresses.Street = address['Street']
+        busPartner.Addresses.StreetNo = address['StreetNo']
+        busPartner.Addresses.Block = address['Block']
+        busPartner.Addresses.County = address['County']
+        busPartner.Addresses.City = address['City']
+        busPartner.Addresses.State = address['State']
+        busPartner.Addresses.ZipCode = address['ZipCode']
+        busPartner.Addresses.Country = address['Country']
+        #BP Contact
+        busPartner.ContactEmployees.Add()
+        busPartner.ContactEmployees.SetCurrentLine(0)
+        busPartner.ContactEmployees.Name = cardname
+        busPartner.ContactEmployees.FirstName = customer['FirstName']
+        busPartner.ContactEmployees.LastName = customer['LastName']
+        busPartner.ContactEmployees.Phone1 = customer["Phone"]
+        busPartner.ContactEmployees.E_Mail = customer["Email"]        
+        lRetCode = busPartner.Add()
+        if lRetCode != 0:
+            log = com.company.GetLastErrorDescription()
+            current_app.logger.error(log)
+            raise Exception(log)
+        return {'CardCode':next_cardcode}
+
+    def updateBusinessPartner(self, CardCode, customer):
+        """Update business partner by CardCode
+        """
+        com = self.com_adaptor       
+        busPartner = com.company.GetBusinessObject(com.constants.oBusinessPartners)
+        busPartner.GetByKey(CardCode);
+        busPartner.UserFields.Fields("Phone1").Value = customer['Phone'] 
+        busPartner.UserFields.Fields("E_Mail").Value = customer['Email']
+        #BP Address
+        address = customer['Address']
+        busPartner.Addresses.Add()
+        busPartner.Addresses.SetCurrentLine(0)
+        busPartner.Addresses.AddressName = "Direccion"    
+        busPartner.Addresses.Street = address['Street']
+        busPartner.Addresses.StreetNo = address['StreetNo']
+        busPartner.Addresses.Block = address['Block']
+        busPartner.Addresses.County = address['County']
+        busPartner.Addresses.City = address['City']
+        busPartner.Addresses.State = address['State']
+        busPartner.Addresses.ZipCode = address['ZipCode']
+        lRetCode = busPartner.Update()
+        if lRetCode != 0:
+            log = com.company.GetLastErrorDescription()
+            current_app.logger.error(log)
+            raise Exception(log)
+        return {'CardCode':CardCode}
 
     def getContacts(self, num=1, columns=[], cardCode=None, contact={}):
         """Retrieve contacts under a business partner by CardCode from SAP B1.
@@ -189,10 +261,13 @@ class SAPB1Adaptor(object):
             cols = " ,".join(columns)
 
         sql = """SELECT top {0} {1} FROM dbo.OCPR""".format(num, cols)
-        params = dict({(k, 'null' if v is None else v) for k, v in contact.items()})
+        if contact:        
+            params = dict({(k, 'null' if v is None else v) for k, v in contact.items()})
+        else:
+            params = {}
         params['cardcode'] = cardCode
         sql = sql + ' WHERE ' + " AND ".join(["{0} = %({1})s".format(k, k) for k in params.keys()])
-        return list(self.sql_adaptor.fetch_all(sql, params))
+        return list(self.sql_adaptor.fetch_all(sql, **params))
 
     def insertContact(self, cardCode, contact):
         """Insert a new contact into a business partner by CardCode.
@@ -288,25 +363,26 @@ class SAPB1Adaptor(object):
         sql = """SELECT Code, Name, Rate from osta"""
         return list(self.sql_adaptor.fetch_all(sql))
 
+    def getUSDRate(self):
+        sql = """SELECT Rate from ORTT where RateDate='{0}'""".format(strftime("%Y-%m-%d"))
+        return list(self.sql_adaptor.fetch_all(sql))
+
     def insertOrder(self, o):
         """Insert an order into SAP B1.
         """
-        o["billto_telephone"] = self.trimValue(o["billto_telephone"], 20)
-        o['billto_address'] = self.trimValue(o['billto_address'], 100)
-        o['shipto_address'] = self.trimValue(o['shipto_address'], 100)
-        com = self.com_adaptor
+        com = self.com_adaptor    
         order = com.company.GetBusinessObject(com.constants.oOrders)
         order.DocDueDate = o['doc_due_date']
         order.CardCode = o['card_code']
-        name = o['billto_firstname'] + ' ' + o['billto_lastname']
-        name = name[0:50]
-        order.CardName = name
-        order.DocCurrency = self.getMainCurrency()
-        order.ContactPersonCode = self.getContactPersonCode(o)
+        order.NumAtCard = str(o['num_at_card'])
+        #Cesehsa User Field
+        order.UserFields.Fields("U_XAM_OC").Value = str(o['orden_compra'])
+        
         if 'expenses_freightname' in o.keys():
             order.Expenses.ExpenseCode = self.getExpnsCode(o['expenses_freightname'])
             order.Expenses.LineTotal = o['expenses_linetotal']
             order.Expenses.TaxCode = o['expenses_taxcode']
+
         if 'discount_percent' in o.keys():
             order.DiscountPercent = o['discount_percent']
 
@@ -318,34 +394,25 @@ class SAPB1Adaptor(object):
         if 'payment_method' in o.keys():
             order.PaymentMethod = o['payment_method']
 
-        # Set Magento Order Inc Id
-        if 'fe_order_id_udf' in o.keys():
-            order.UserFields.Fields.Item(o['fe_order_id_udf']).Value = str(o['fe_order_id'])
-        else:
-            order.NumAtCard = str(o['fe_order_id'])
+        ## Set bill to address properties
+        #order.AddressExtension.BillToCity = o['billto_city']
+        #order.AddressExtension.BillToCountry = o['billto_country']
+        #order.AddressExtension.BillToCounty = o['billto_country']
+        #order.AddressExtension.BillToState = o['billto_state']
+        #order.AddressExtension.BillToStreet = o['billto_address']
+        #order.AddressExtension.BillToZipCode = o['billto_zipcode']
 
-        # Set bill to address properties
-        # order.AddressExtension.BillToBlock = "BillToBlockU"
-        # order.AddressExtension.BillToBuilding = "BillToBuildingU"
-        order.AddressExtension.BillToCity = o['billto_city']
-        order.AddressExtension.BillToCountry = o['billto_country']
-        order.AddressExtension.BillToCounty = o['billto_country']
-        order.AddressExtension.BillToState = o['billto_state']
-        order.AddressExtension.BillToStreet = o['billto_address']
-        # order.AddressExtension.BillToStreetNo = "ShipToStreetNoU"
-        order.AddressExtension.BillToZipCode = o['billto_zipcode']
-        # order.AddressExtension.BillToAddressType = "BillToAddressTypeU"
+        ## Set ship to address properties
+        #order.AddressExtension.ShipToCity = o['shipto_city']
+        #order.AddressExtension.ShipToCountry = o['shipto_country']
+        #order.AddressExtension.ShipToCounty = o['shipto_county']
+        #order.AddressExtension.ShipToState = o['shipto_state']
+        #order.AddressExtension.ShipToStreet = o['shipto_address']
+        #order.AddressExtension.ShipToZipCode = o['shipto_zipcode']
 
-        # Set ship to address properties
-        # order.AddressExtension.ShipToBlock = "ShipToBlockU"
-        # order.AddressExtension.ShipToBuilding = "ShipToBuildingU"
-        order.AddressExtension.ShipToCity = o['shipto_city']
-        order.AddressExtension.ShipToCountry = o['shipto_country']
-        order.AddressExtension.ShipToCounty = o['shipto_county']
-        order.AddressExtension.ShipToState = o['shipto_state']
-        order.AddressExtension.ShipToStreet = o['shipto_address']
-        # order.AddressExtension.ShipToStreetNo = "ShipToStreetNoU"
-        order.AddressExtension.ShipToZipCode = o['shipto_zipcode']
+        # Set Comments
+        if 'comments' in o.keys():
+            order.Comments = o['comments']
 
         i = 0
         for item in o['items']:
@@ -353,9 +420,6 @@ class SAPB1Adaptor(object):
             order.Lines.SetCurrentLine(i)
             order.Lines.ItemCode = item['itemcode']
             order.Lines.Quantity = float(item['quantity'])
-            order.Lines.Price = decimal.Decimal(item['price'])
-            order.Lines.TaxCode = item['taxcode']
-            order.Lines.LineTotal = item['linetotal']
             i = i + 1
 
         lRetCode = order.Add()
@@ -363,15 +427,52 @@ class SAPB1Adaptor(object):
             error = str(self.com_adaptor.company.GetLastError())
             current_app.logger.error(error)
             raise Exception(error)
-        else:
-            params = None
-            if 'fe_order_id_udf' in o.keys():
-                params = {o['fe_order_id_udf']: {'value': str(o['fe_order_id'])}}
-            else:
-                params = {'NumAtCard': {'value': str(o['fe_order_id'])}}
-            orders = self.getOrders(num=1, columns=['DocEntry'], params=params)
-            boOrderId = orders[0]['DocEntry']
-            return boOrderId
+        
+        params = None
+        params = {'NumAtCard': {'value': str(o['num_at_card'])}}
+        orders = self.getOrders(num=1, columns=['DocEntry'], params=params)
+        orderDocEntry = orders[0]['DocEntry']
+        #Linking Sales Order with Quotation
+        if 'quotation_id' in o.keys():
+            link_quotation_sql= """UPDATE dbo.RDR1
+                                        SET dbo.RDR1.BaseRef = q.DocNum, dbo.RDR1.BaseType = 23, dbo.RDR1.BaseEntry = q.DocEntry
+                                        FROM dbo.OQUT q
+                                        WHERE dbo.RDR1.DocEntry = '{0}'
+                                        AND q.DocEntry = '{1}'
+                                     """.format(orderDocEntry,str(o['quotation_id']))
+            cursor = self.sql_adaptor.cursor
+            cursor.execute(link_quotation_sql)
+            self.sql_adaptor.conn.commit()
+        return orderDocEntry
+        
+    def insertQuotation(self, q):
+        """Create a quotation into SAP B1.
+        """
+        com = self.com_adaptor    
+        quotation = com.company.GetBusinessObject(com.constants.oQuotations)
+        quotation.DocDueDate = q['doc_due_date']
+        quotation.CardCode = q['card_code']
+        quotation.NumAtCard = str(q['num_at_card'])
+
+        i = 0
+        for item in q['items']:
+            quotation.Lines.Add()
+            quotation.Lines.SetCurrentLine(i)
+            quotation.Lines.ItemCode = item['itemcode']
+            quotation.Lines.Quantity = float(item['quantity'])
+            i = i + 1
+
+        lRetQCode = quotation.Add()
+        if lRetQCode != 0:
+            error = str(self.com_adaptor.company.GetLastError())
+            current_app.logger.error(error)
+            raise Exception(error)
+        
+        quotation_sql = """SELECT top(1) DocEntry FROM dbo.OQUT
+                            WHERE NumAtCard = %s"""
+        sqlresult = self.sql_adaptor.fetchone(quotation_sql, q['num_at_card'])
+        quotationDocEntry = sqlresult['DocEntry']
+        return quotationDocEntry
 
     def cancelOrder(self, o):
         """Cancel an order in SAP B1.
@@ -409,7 +510,6 @@ class SAPB1Adaptor(object):
         }
         if len(params) > 0:
             sql = sql + ' WHERE ' + " AND ".join(["{0} = %({1})s".format(k, k) for k in params.keys()])
-
         return list(self.sql_adaptor.fetch_all(sql, params))
 
     def getShipments(self, num=100, columns=[], params={}, itemColumns=[]):
