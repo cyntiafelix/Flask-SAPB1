@@ -187,7 +187,7 @@ class SAPB1Adaptor(object):
         sql_result = self.sql_adaptor.fetchone(cardcode_sql)
         last_cardcode = sql_result.get('CardCode')
         print('Last CardCode:%s'%last_cardcode)
-        next_cardcode = 'C%05d'%(int(last_cardcode.replace('C','')) + 1)
+        next_cardcode = 'C%05d'%(int(last_cardcode.replace('C','').replace('c','')) + 1)
         print('Next CardCode:%s'%next_cardcode)
         com = self.com_adaptor       
         busPartner = com.company.GetBusinessObject(com.constants.oBusinessPartners)
@@ -195,6 +195,7 @@ class SAPB1Adaptor(object):
         cardname = customer['FirstName'] + ' ' + customer['LastName']        
         busPartner.CardName = cardname
         busPartner.GroupCode = '158' #Otros
+        busPartner.Phone1 = customer["Phone"]        
         busPartner.UserFields.Fields("LicTradNum").Value = customer['RFC'] 
         busPartner.UserFields.Fields("Phone1").Value = customer['Phone'] 
         busPartner.UserFields.Fields("E_Mail").Value = customer['Email']
@@ -223,7 +224,7 @@ class SAPB1Adaptor(object):
         if lRetCode != 0:
             log = com.company.GetLastErrorDescription()
             current_app.logger.error(log)
-            raise Exception(log)
+            raise Exception(log, customer)            
         return {'CardCode':next_cardcode}
 
     def updateBusinessPartner(self, CardCode, customer):
@@ -420,6 +421,8 @@ class SAPB1Adaptor(object):
             order.Lines.SetCurrentLine(i)
             order.Lines.ItemCode = item['itemcode']
             order.Lines.Quantity = float(item['quantity'])
+            if item.get('price'):
+                order.Lines.UnitPrice = float(item['price'])
             i = i + 1
 
         lRetCode = order.Add()
@@ -432,6 +435,16 @@ class SAPB1Adaptor(object):
         params = {'NumAtCard': {'value': str(o['num_at_card'])}}
         orders = self.getOrders(num=1, columns=['DocEntry'], params=params)
         orderDocEntry = orders[0]['DocEntry']
+        # Set Salesperson
+        if 'slpcode' in o.keys():
+            salesperson_sql= """UPDATE dbo.ORDR
+                                        SET SlpCode = {0}
+                                        WHERE DocEntry = '{1}'
+                                     """.format(o['slpcode'], orderDocEntry)
+            cursor = self.sql_adaptor.cursor
+            cursor.execute(salesperson_sql)
+            self.sql_adaptor.conn.commit()
+            
         #Linking Sales Order with Quotation
         if 'quotation_id' in o.keys():
             link_quotation_sql= """UPDATE dbo.RDR1
@@ -442,7 +455,7 @@ class SAPB1Adaptor(object):
                                      """.format(orderDocEntry,str(o['quotation_id']))
             cursor = self.sql_adaptor.cursor
             cursor.execute(link_quotation_sql)
-            self.sql_adaptor.conn.commit()
+            self.sql_adaptor.conn.commit()            
         return orderDocEntry
         
     def insertQuotation(self, q):
@@ -460,6 +473,8 @@ class SAPB1Adaptor(object):
             quotation.Lines.SetCurrentLine(i)
             quotation.Lines.ItemCode = item['itemcode']
             quotation.Lines.Quantity = float(item['quantity'])
+            if item.get('price'):
+                quotation.Lines.UnitPrice = float(item['price'])
             i = i + 1
 
         lRetQCode = quotation.Add()
@@ -537,7 +552,7 @@ class SAPB1Adaptor(object):
         if columns:
             cols = columns
         else:
-            cols = 'ItemCode, ItemName, ItmsGrpCod, UgpEntry, U_MARCA, U_DIVISION, AvgPrice, CreateDate, UpdateDate'
+            cols = 'ItemCode, ItemName, ItmsGrpCod, UgpEntry, U_MARCA, U_DIVISION, CreateDate, UpdateDate'
 
         if whs:
             sql = """SELECT top {0} {1} FROM dbo.OITM
@@ -573,4 +588,23 @@ class SAPB1Adaptor(object):
             sql = """SELECT top {0} {1} FROM dbo.ITM1
                      WHERE PriceList = {2}""".format(limit, cols, listNumber)
 
+        return list(self.sql_adaptor.fetch_all(sql))
+    
+    def getStockNum(self, limit=1, columns=None, whs=None, code=None):
+        """Retrieve stock(products) from SAP B1."""
+        if columns:
+            cols = columns
+        else:
+            cols = 'ItemCode, WhsCode, OnHand, IsCommited'
+
+        wclause = None
+        if whs:
+            wclause = """ WhsCode = '{0}' """.format(whs)
+            
+        if code:
+            sql = """SELECT {0} FROM dbo.OITW
+                     WHERE ItemCode = '{1}' {2}""".format(cols, code, (" AND " + wclause) if wclause else '')
+        else:
+            sql = """SELECT top {0} {1} FROM dbo.OITW {2}""".format(limit, cols, (" WHERE " + wclause) if wclause else '')
+        print sql
         return list(self.sql_adaptor.fetch_all(sql))
