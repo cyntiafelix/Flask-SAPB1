@@ -456,9 +456,9 @@ class SAPB1Adaptor(object):
         if columns:
             cols = columns
         else:
-            cols = 'ItemCode, Price, Currency, Ovrwritten, Factor'
+            cols = 'ItemCode, Price, Currency, Ovrwritten, Factor, PriceList'
 
-        listNumber = 2  # Lista de Ventas
+        listNumber = 11  # Lista de Ventas
         if whs:
             sql = """SELECT top {0} {1} FROM dbo.ITM1
                      WHERE PriceList = {2}
