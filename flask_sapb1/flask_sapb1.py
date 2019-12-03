@@ -32,7 +32,6 @@ class SapB1ComAdaptor(object):
         if result != 0:
             raise Exception("Not connected to COM %" % result)
         print('Connected to COM')
-        
 
     def __del__(self):
         if self.company:
@@ -224,7 +223,12 @@ class SAPB1Adaptor(object):
         if lRetCode != 0:
             log = com.company.GetLastErrorDescription()
             current_app.logger.error(log)
-            raise Exception(log, customer)            
+            if log == '(1) RFC Existente':
+                cardcode_sql = """SELECT T0.CardCode AS CardCode FROM OCRD T0 WHERE LicTradNum = '{0}'""".format(customer['RFC'])
+                sql_result = self.sql_adaptor.fetchone(cardcode_sql)
+                cardcode = sql_result.get('CardCode')
+                return {'CardCode':cardcode}
+            raise Exception(log, customer)
         return {'CardCode':next_cardcode}
 
     def updateBusinessPartner(self, CardCode, customer):
@@ -378,6 +382,7 @@ class SAPB1Adaptor(object):
         order.NumAtCard = str(o['num_at_card'])
         #Cesehsa User Field
         order.UserFields.Fields("U_XAM_OC").Value = str(o['orden_compra'])
+        order.UserFields.Fields("U_tick_cotizacion").Value = str('')
         
         if 'expenses_freightname' in o.keys():
             order.Expenses.ExpenseCode = self.getExpnsCode(o['expenses_freightname'])
@@ -423,6 +428,8 @@ class SAPB1Adaptor(object):
             order.Lines.Quantity = float(item['quantity'])
             if item.get('price'):
                 order.Lines.UnitPrice = float(item['price'])
+            if item.get('discount'):
+                order.Lines.DiscountPercent = float(item['discount'])
             i = i + 1
 
         lRetCode = order.Add()
@@ -466,7 +473,9 @@ class SAPB1Adaptor(object):
         quotation.DocDueDate = q['doc_due_date']
         quotation.CardCode = q['card_code']
         quotation.NumAtCard = str(q['num_at_card'])
-
+        #Cesehsa User Field
+        quotation.UserFields.Fields("U_tick_cotizacion").Value = str('')
+        
         i = 0
         for item in q['items']:
             quotation.Lines.Add()
@@ -474,7 +483,10 @@ class SAPB1Adaptor(object):
             quotation.Lines.ItemCode = item['itemcode']
             quotation.Lines.Quantity = float(item['quantity'])
             if item.get('price'):
+                print(float(item['price']))
                 quotation.Lines.UnitPrice = float(item['price'])
+            if item.get('discount'):
+                quotation.Lines.DiscountPercent = float(item['discount'])                
             i = i + 1
 
         lRetQCode = quotation.Add()
