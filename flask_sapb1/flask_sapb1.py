@@ -185,9 +185,9 @@ class SAPB1Adaptor(object):
         cardcode_sql = """SELECT MAX(T0.CardCode) AS CardCode FROM OCRD T0 WHERE T0.CARDTYPE = 'C' FOR BROWSE"""
         sql_result = self.sql_adaptor.fetchone(cardcode_sql)
         last_cardcode = sql_result.get('CardCode')
-        print('Last CardCode SAP:%s'%last_cardcode)
+        print('Last CardCode:%s'%last_cardcode)
         next_cardcode = 'C%05d'%(int(last_cardcode.replace('C','').replace('c','')) + 1)
-        print('Next CardCode SAP:%s'%next_cardcode)
+        print('Next CardCode:%s'%next_cardcode)
         com = self.com_adaptor       
         busPartner = com.company.GetBusinessObject(com.constants.oBusinessPartners)
         busPartner.CardCode = next_cardcode
