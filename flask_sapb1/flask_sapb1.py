@@ -430,6 +430,9 @@ class SAPB1Adaptor(object):
                 order.Lines.UnitPrice = float(item['price'])
             if item.get('discount'):
                 order.Lines.DiscountPercent = float(item['discount'])
+            if item.get('whs'):
+                print('WHS %s:'%item['whs'])
+                order.Lines.WarehouseCode = item['whs']
             i = i + 1
 
         lRetCode = order.Add()
@@ -483,7 +486,7 @@ class SAPB1Adaptor(object):
             quotation.Lines.ItemCode = item['itemcode']
             quotation.Lines.Quantity = float(item['quantity'])
             if item.get('price'):
-                print(float(item['price']))
+                print('Price %s:'%float(item['price']))
                 quotation.Lines.UnitPrice = float(item['price'])
             if item.get('discount'):
                 quotation.Lines.DiscountPercent = float(item['discount'])                
