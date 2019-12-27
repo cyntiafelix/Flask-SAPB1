@@ -32,7 +32,6 @@ class SapB1ComAdaptor(object):
         if result != 0:
             raise Exception("Not connected to COM %" % result)
         print('Connected to COM')
-        
 
     def __del__(self):
         if self.company:
@@ -186,9 +185,9 @@ class SAPB1Adaptor(object):
         cardcode_sql = """SELECT MAX(T0.CardCode) AS CardCode FROM OCRD T0 WHERE T0.CARDTYPE = 'C' FOR BROWSE"""
         sql_result = self.sql_adaptor.fetchone(cardcode_sql)
         last_cardcode = sql_result.get('CardCode')
-        print('Last CardCode:%s'%last_cardcode)
+        print('Last CardCode SAP:%s'%last_cardcode)
         next_cardcode = 'C%05d'%(int(last_cardcode.replace('C','').replace('c','')) + 1)
-        print('Next CardCode:%s'%next_cardcode)
+        print('Next CardCode SAP:%s'%next_cardcode)
         com = self.com_adaptor       
         busPartner = com.company.GetBusinessObject(com.constants.oBusinessPartners)
         busPartner.CardCode = next_cardcode
@@ -431,6 +430,9 @@ class SAPB1Adaptor(object):
                 order.Lines.UnitPrice = float(item['price'])
             if item.get('discount'):
                 order.Lines.DiscountPercent = float(item['discount'])
+            if item.get('whs'):
+                print('WHS %s:'%item['whs'])
+                order.Lines.WarehouseCode = item['whs']
             i = i + 1
 
         lRetCode = order.Add()
@@ -484,7 +486,7 @@ class SAPB1Adaptor(object):
             quotation.Lines.ItemCode = item['itemcode']
             quotation.Lines.Quantity = float(item['quantity'])
             if item.get('price'):
-                print(float(item['price']))
+                print('Price %s:'%float(item['price']))
                 quotation.Lines.UnitPrice = float(item['price'])
             if item.get('discount'):
                 quotation.Lines.DiscountPercent = float(item['discount'])                
@@ -584,9 +586,9 @@ class SAPB1Adaptor(object):
         if columns:
             cols = columns
         else:
-            cols = 'ItemCode, Price, Currency, Ovrwritten, Factor'
+            cols = 'ItemCode, Price, Currency, Ovrwritten, Factor, PriceList'
 
-        listNumber = 2  # Lista de Ventas
+        listNumber = 11  # Lista de Ventas
         if whs:
             sql = """SELECT top {0} {1} FROM dbo.ITM1
                      WHERE PriceList = {2}
