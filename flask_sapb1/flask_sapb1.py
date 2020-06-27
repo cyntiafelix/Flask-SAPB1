@@ -12,6 +12,15 @@ except ImportError:
     from flask import _request_ctx_stack as stack
 
 
+def _next_cardcode(last):
+    size = len(last) - 1
+    padding = '0%s' % size
+    last = last.lower().replace('c', '')
+    next_num = int(last) + 1
+    next_num = format(next_num, padding)
+    return 'C' + next_num
+
+
 class SapB1ComAdaptor(object):
     """Adaptor contains SAP B1 COM object.
     """
@@ -179,30 +188,37 @@ class SAPB1Adaptor(object):
         sql = """SELECT MainCurncy FROM dbo.OADM"""
         return self.sql_adaptor.fetchone(sql)['MainCurncy']
 
+    def get_next_cardcode(self):
+        cardcode_sql = """
+        SELECT MAX(T0.CardCode) AS CardCode
+        FROM OCRD T0 WHERE T0.CARDTYPE = 'C' FOR BROWSE
+        """
+        result = self.sql_adaptor.fetchone(cardcode_sql)
+        last = result.get('CardCode')
+        print('Last CardCode:%s' % last)
+        next_cardcode = _next_cardcode(last)
+        print('Next CardCode:%s' % next_cardcode)
+        return next_cardcode
+
     def insertBusinessPartner(self, customer):
         """Insert a new business partner
         """
-        cardcode_sql = """SELECT MAX(T0.CardCode) AS CardCode FROM OCRD T0 WHERE T0.CARDTYPE = 'C' FOR BROWSE"""
-        sql_result = self.sql_adaptor.fetchone(cardcode_sql)
-        last_cardcode = sql_result.get('CardCode')
-        print('Last CardCode:%s'%last_cardcode)
-        next_cardcode = 'C%05d'%(int(last_cardcode.replace('C','').replace('c','')) + 1)
-        print('Next CardCode:%s'%next_cardcode)
-        com = self.com_adaptor       
+        next_cardcode = self.get_next_cardcode()
+        com = self.com_adaptor
         busPartner = com.company.GetBusinessObject(com.constants.oBusinessPartners)
         busPartner.CardCode = next_cardcode
-        cardname = customer['FirstName'] + ' ' + customer['LastName']        
+        cardname = customer['FirstName'] + ' ' + customer.get('LastName', '')
         busPartner.CardName = cardname
-        busPartner.GroupCode = '158' #Otros
-        busPartner.Phone1 = customer["Phone"]        
-        busPartner.UserFields.Fields("LicTradNum").Value = customer['RFC'] 
-        busPartner.UserFields.Fields("Phone1").Value = customer['Phone'] 
+        busPartner.GroupCode = '158'  # Otros
+        busPartner.Phone1 = customer["Phone"]
+        busPartner.UserFields.Fields("LicTradNum").Value = customer['RFC']
+        busPartner.UserFields.Fields("Phone1").Value = customer['Phone']
         busPartner.UserFields.Fields("E_Mail").Value = customer['Email']
         #BP Address
         address = customer['Address']
         busPartner.Addresses.Add()
         busPartner.Addresses.SetCurrentLine(0)
-        busPartner.Addresses.AddressName = "Direccion"    
+        busPartner.Addresses.AddressName = "Direccion"
         busPartner.Addresses.Street = address['Street']
         busPartner.Addresses.StreetNo = address['StreetNo']
         busPartner.Addresses.Block = address['Block']
@@ -211,14 +227,15 @@ class SAPB1Adaptor(object):
         busPartner.Addresses.State = address['State']
         busPartner.Addresses.ZipCode = address['ZipCode']
         busPartner.Addresses.Country = address['Country']
-        #BP Contact
+
+        # BP Contact
         busPartner.ContactEmployees.Add()
         busPartner.ContactEmployees.SetCurrentLine(0)
         busPartner.ContactEmployees.Name = cardname
         busPartner.ContactEmployees.FirstName = customer['FirstName']
         busPartner.ContactEmployees.LastName = customer['LastName']
         busPartner.ContactEmployees.Phone1 = customer["Phone"]
-        busPartner.ContactEmployees.E_Mail = customer["Email"]        
+        busPartner.ContactEmployees.E_Mail = customer["Email"]
         lRetCode = busPartner.Add()
         if lRetCode != 0:
             log = com.company.GetLastErrorDescription()
@@ -227,9 +244,9 @@ class SAPB1Adaptor(object):
                 cardcode_sql = """SELECT T0.CardCode AS CardCode FROM OCRD T0 WHERE LicTradNum = '{0}'""".format(customer['RFC'])
                 sql_result = self.sql_adaptor.fetchone(cardcode_sql)
                 cardcode = sql_result.get('CardCode')
-                return {'CardCode':cardcode}
+                return {'CardCode': cardcode}
             raise Exception(log, customer)
-        return {'CardCode':next_cardcode}
+        return {'CardCode': next_cardcode}
 
     def updateBusinessPartner(self, CardCode, customer):
         """Update business partner by CardCode
@@ -604,7 +621,7 @@ class SAPB1Adaptor(object):
                      WHERE PriceList = {2}""".format(limit, cols, listNumber)
 
         return list(self.sql_adaptor.fetch_all(sql))
-    
+
     def getStockNum(self, limit=1, columns=None, whs=None, code=None):
         """Retrieve stock(products) from SAP B1."""
         if columns:
@@ -615,7 +632,7 @@ class SAPB1Adaptor(object):
         wclause = None
         if whs:
             wclause = """ WhsCode = '{0}' """.format(whs)
-            
+
         if code:
             sql = """SELECT {0} FROM dbo.OITW
                      WHERE ItemCode = '{1}' {2}""".format(cols, code, (" AND " + wclause) if wclause else '')
