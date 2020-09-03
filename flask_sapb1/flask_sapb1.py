@@ -231,9 +231,9 @@ class SAPB1Adaptor(object):
         # BP Contact
         busPartner.ContactEmployees.Add()
         busPartner.ContactEmployees.SetCurrentLine(0)
-        busPartner.ContactEmployees.Name = cardname
-        busPartner.ContactEmployees.FirstName = customer['FirstName']
-        busPartner.ContactEmployees.LastName = customer['LastName']
+        busPartner.ContactEmployees.Name = cardname[:20]
+        busPartner.ContactEmployees.FirstName = customer['FirstName'][:20]
+        busPartner.ContactEmployees.LastName = customer['LastName'][:20]
         busPartner.ContactEmployees.Phone1 = customer["Phone"]
         busPartner.ContactEmployees.E_Mail = customer["Email"]
         lRetCode = busPartner.Add()
@@ -251,7 +251,7 @@ class SAPB1Adaptor(object):
     def updateBusinessPartner(self, CardCode, customer):
         """Update business partner by CardCode
         """
-        com = self.com_adaptor       
+        com = self.com_adaptor
         busPartner = com.company.GetBusinessObject(com.constants.oBusinessPartners)
         busPartner.GetByKey(CardCode);
         busPartner.UserFields.Fields("Phone1").Value = customer['Phone'] 
@@ -260,7 +260,7 @@ class SAPB1Adaptor(object):
         address = customer['Address']
         busPartner.Addresses.Add()
         busPartner.Addresses.SetCurrentLine(0)
-        busPartner.Addresses.AddressName = "Direccion"    
+        busPartner.Addresses.AddressName = "Direccion"
         busPartner.Addresses.Street = address['Street']
         busPartner.Addresses.StreetNo = address['StreetNo']
         busPartner.Addresses.Block = address['Block']
@@ -283,7 +283,7 @@ class SAPB1Adaptor(object):
             cols = " ,".join(columns)
 
         sql = """SELECT top {0} {1} FROM dbo.OCPR""".format(num, cols)
-        if contact:        
+        if contact:
             params = dict({(k, 'null' if v is None else v) for k, v in contact.items()})
         else:
             params = {}
